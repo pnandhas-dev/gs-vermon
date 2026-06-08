@@ -203,3 +203,72 @@ Pipelines act as containers for entities. They are managed using standard CRUD R
   ```
 - **Delete Pipeline:** `DELETE /pipelines/{pipeline_id}`
 - **List Entities in Pipeline:** `GET /pipelines/{pipeline_id}/entities`
+
+---
+
+## 6. Understanding "Checkpoint Rows" (A/B Metrics)
+
+The `list_entities.py` script displays snapshot/migration progress in an **`A/B (Pct%)`** format under the "Checkpoint Rows" column. However, the exact meaning and source of **A** (migrated rows) and **B** (total rows) completely changes depending on whether you are running with or without the `--agent` flag.
+
+### 6.1 API Client Mode (Without `--agent`)
+By default, the script reads from the Gluesync Prometheus metrics endpoint (`GET /metrics`). Prometheus metrics are designed for tracking continuous throughput over time, not absolute state.
+
+* **A (Numerator):** Maps to `gluesync_total_count`.
+  * **Meaning:** An ever-increasing cumulative counter of **all** replication events (snapshot rows + CDC inserts + CDC updates + CDC deletes) processed since the container started.
+* **B (Denominator):** Maps to `gluesync_total_snapshot_count`.
+  * **Meaning:** The static size of the snapshot phase as recorded by the metrics exporter. If a pipeline is restarted and bypasses the snapshot phase (because it previously completed), this metric is never emitted, and the script defaults to `0`.
+
+**Example:** `164/82 (200.0%)`
+Because `A` is a cumulative counter of all events, it will quickly exceed `B` once live CDC traffic begins, leading to percentages over 100%.
+
+### 6.2 Monitor Agent Mode (With `--agent`)
+When using `--agent`, the script queries your local `monitor-agent` container (`GET /status`). The agent derives its data entirely from the real-time WebSocket telemetry stream used by the Gluesync UI.
+
+* **A (Numerator):** Maps to `snapshotCount`.
+  * **Meaning:** The exact number of initial bulk-load rows migrated *during the current runtime session*.
+* **B (Denominator):** Maps to `totalSnapshotRows`.
+  * **Meaning:** The exact total size of the source table when the snapshot began.
+
+#### WebSocket JSON Structure Source
+The agent parses these from the `MetricsMessage` pushed over the WebSocket:
+```json
+{
+  "type": "MetricsMessage",
+  "content": {
+    "pipelinesMetrics": {
+      "ef9c88fd": {
+        "entitiesMetrics": {
+          "b419b51e": [
+            {
+              "snapshotMetrics": {
+                "snapshotCount": 82,          // Extracted as 'A'
+                "totalSnapshotRows": 82,      // Extracted as 'B'
+                "snapshotProgress": 1.0
+              }
+            }
+          ]
+        }
+      }
+    }
+  }
+}
+```
+
+#### What is stored in the Agent Cache?
+The `monitor-agent` maintains an ephemeral SQLite database (`monitor_cache.db`) in memory to store the latest known state from the WebSocket.
+When it receives a `MetricsMessage`, it executes an `UPSERT` into the `entity_status` table:
+```sql
+CREATE TABLE entity_status (
+    entity_id TEXT PRIMARY KEY,
+    pipeline_id TEXT,
+    migration_active INTEGER,
+    sync_active INTEGER,
+    migrated_rows INTEGER,       -- Stores 'A' (snapshotCount)
+    total_rows INTEGER,          -- Stores 'B' (totalSnapshotRows)
+    is_completed INTEGER,
+    ws_message_type TEXT,
+    last_updated TIMESTAMP
+);
+```
+**Example:** `0/49,998 (0.0%)`
+This is highly reliable. It proves the backend knows the table size is 49,998, but correctly reports that `0` snapshot rows were processed *in this session* because the snapshot phase was bypassed upon restart.

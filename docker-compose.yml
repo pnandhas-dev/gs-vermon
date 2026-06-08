@@ -1,6 +1,7 @@
 name: gsvermon
 
 services:
+  # Microsoft Azure SQL Edge Container for target database. (not part of the gsvermon!)
   mssql:
     image: mcr.microsoft.com/azure-sql-edge:latest
     container_name: gsvermon-mssql

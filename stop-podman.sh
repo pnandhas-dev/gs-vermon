@@ -10,14 +10,14 @@ if ! command -v podman >/dev/null 2>&1; then
   exit 1
 fi
 
-# Determine compose command: prefer 'podman compose' wrapper, fallback to 'podman-compose'
+# Determine compose command: prefer 'podman-compose' over 'podman compose' to prevent label splits
 COMPOSE_CMD=""
-if podman compose version >/dev/null 2>&1; then
-  COMPOSE_CMD="podman compose"
-elif command -v podman-compose >/dev/null 2>&1; then
+if command -v podman-compose >/dev/null 2>&1; then
   COMPOSE_CMD="podman-compose"
+elif podman compose version >/dev/null 2>&1; then
+  COMPOSE_CMD="podman compose"
 else
-  echo "Error: Neither 'podman compose' nor 'podman-compose' is available. Please install podman-compose or configure a compose provider." >&2
+  echo "Error: Neither 'podman-compose' nor 'podman compose' is available. Please install podman-compose." >&2
   exit 1
 fi
 
