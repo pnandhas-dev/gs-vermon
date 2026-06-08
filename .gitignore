@@ -1,0 +1,13 @@
+# Environment variables
+.env
+.env.example
+
+# Python
+__pycache__/
+*.pyc
+
+# Local cache
+monitor-agent/monitor_cache.db
+
+# macOS
+.DS_Store

@@ -1,0 +1,45 @@
+name: gsvermon
+
+services:
+  mssql:
+    image: mcr.microsoft.com/azure-sql-edge:latest
+    container_name: gsvermon-mssql
+    restart: always
+    ports:
+      - "1433:1433"
+    environment:
+      - ACCEPT_EULA=Y
+      - MSSQL_SA_PASSWORD=${MSSQL_PASSWORD}
+    volumes:
+      - mssql-data:/var/opt/mssql
+    networks:
+      - gsvermon-net
+      - gluesync-net
+
+  monitor-agent:
+    build:
+      context: ./monitor-agent
+      dockerfile: Dockerfile
+    container_name: gsvermon-monitor-agent
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      - GLUESYNC_API_URL=${GLUESYNC_API_URL:-https://gluesync-core-hub:1717}
+      - GLUESYNC_USER=${GLUESYNC_USER:-admin}
+      - GLUESYNC_PASSWORD=${GLUESYNC_PASSWORD}
+      - AGENT_PORT=8080
+      - RECONNECT_DELAY=5
+    networks:
+      - gsvermon-net
+      - gluesync-net
+
+networks:
+  gsvermon-net:
+    driver: bridge
+  gluesync-net:
+    external: true
+    name: gluesync-net
+
+volumes:
+  mssql-data:
